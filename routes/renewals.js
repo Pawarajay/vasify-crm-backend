@@ -871,40 +871,118 @@ const addMonths = (dateStr, months) => {
 // Assumes customers table has: recurring_enabled, recurring_interval,
 // recurring_amount, recurring_service, next_renewal_date,
 // default_renewal_status, default_renewal_reminder_days, default_renewal_notes.
+// const buildRenewalFromCustomer = (customer, body) => {
+//   const { service, amount, expiryDate, status, reminderDays, notes } = body;
+
+//   const finalService =
+//     service ??
+//     customer.recurring_service ??
+//     "Service";
+
+//   const finalAmount =
+//     amount !== undefined
+//       ? Number(amount)
+//       : customer.recurring_amount !== null && customer.recurring_amount !== undefined
+//       ? Number(customer.recurring_amount)
+//       : 0;
+
+//   let finalExpiry;
+//   if (expiryDate) {
+//     finalExpiry = toSqlDate(expiryDate);
+//   } else {
+//     const base = customer.next_renewal_date || new Date().toISOString().slice(0, 10);
+//     const interval = customer.recurring_interval || "monthly";
+//     if (interval === "yearly") {
+//       finalExpiry = addMonths(base, 12);
+//     } else {
+//       finalExpiry = addMonths(base, 1);
+//     }
+//     finalExpiry = toSqlDate(finalExpiry);
+//   }
+
+//   const finalStatus = status || customer.default_renewal_status || "active";
+//   const finalReminderDays =
+//     reminderDays !== undefined
+//       ? Number(reminderDays)
+//       : customer.default_renewal_reminder_days ?? 30;
+//   const finalNotes =
+//     notes ??
+//     customer.default_renewal_notes ??
+//     null;
+
+//   return {
+//     service: finalService,
+//     amount: finalAmount,
+//     expiryDate: finalExpiry,
+//     status: finalStatus,
+//     reminderDays: finalReminderDays,
+//     notes: finalNotes,
+//   };
+// };
+
+//testing 24-12-2025
+// Build renewal from customer settings + request body
+// Now uses customer.created_at as base for expiry when expiryDate is not provided.
 const buildRenewalFromCustomer = (customer, body) => {
   const { service, amount, expiryDate, status, reminderDays, notes } = body;
 
+  // 1) Service: from request -> customer.recurring_service -> fallback
   const finalService =
     service ??
     customer.recurring_service ??
+    customer.service ??
     "Service";
 
+  // 2) Amount: from request -> customer.recurring_amount -> 0
   const finalAmount =
     amount !== undefined
       ? Number(amount)
-      : customer.recurring_amount !== null && customer.recurring_amount !== undefined
+      : customer.recurring_amount !== null &&
+        customer.recurring_amount !== undefined
       ? Number(customer.recurring_amount)
       : 0;
 
+  // 3) Expiry: from request OR derived from customer.created_at + interval
   let finalExpiry;
   if (expiryDate) {
+    // When UI sends a specific expiry date
     finalExpiry = toSqlDate(expiryDate);
   } else {
-    const base = customer.next_renewal_date || new Date().toISOString().slice(0, 10);
-    const interval = customer.recurring_interval || "monthly";
-    if (interval === "yearly") {
-      finalExpiry = addMonths(base, 12);
-    } else {
-      finalExpiry = addMonths(base, 1);
-    }
-    finalExpiry = toSqlDate(finalExpiry);
+    // Derive from created_at + interval
+    const base =
+      customer.created_at ||
+      new Date().toISOString().slice(0, 10); // safety fallback
+
+    const interval = customer.recurring_interval || "monthly"; // "monthly" | "yearly"
+    const monthsToAdd = interval === "yearly" ? 12 : 1;
+
+    const computed = addMonths(base, monthsToAdd); // returns YYYY-MM-DD string
+    finalExpiry = toSqlDate(computed);
   }
 
-  const finalStatus = status || customer.default_renewal_status || "active";
+  // 4) Status: from request -> customer default -> auto from expiry
+  let finalStatus =
+    status || customer.default_renewal_status || "active";
+
+  // If still default, auto-adjust based on how far expiry is
+  if (!status) {
+    const days = calculateDaysUntilExpiry(finalExpiry);
+    if (days < 0) {
+      finalStatus = "expired";
+    } else if (days <= 7) {
+      finalStatus = "expiring";
+    } else {
+      finalStatus = "active";
+    }
+  }
+
+  // 5) Reminder days: from request -> customer default -> 30
   const finalReminderDays =
     reminderDays !== undefined
       ? Number(reminderDays)
       : customer.default_renewal_reminder_days ?? 30;
+
+  // 6) Notes: from request -> customer default -> null
   const finalNotes =
     notes ??
     customer.default_renewal_notes ??
@@ -913,7 +991,7 @@ const buildRenewalFromCustomer = (customer, body) => {
   return {
     service: finalService,
     amount: finalAmount,
-    expiryDate: finalExpiry,
+    expiryDate: finalExpiry,  // YYYY-MM-DD
     status: finalStatus,
     reminderDays: finalReminderDays,
     notes: finalNotes,
@@ -1599,6 +1677,164 @@ router.get("/stats/overview", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("Renewal stats error:", error);
     res.status(500).json({ error: "Failed to fetch renewal statistics" });
+  }
+});
+// Auto-generate renewals for all customers without a renewal
+// router.post(
+//   "/auto-generate",
+//   authenticateToken,
+//   async (req, res) => {
+//     try {
+//       // Only admins can run this
+//       if (req.user.role !== "admin") {
+//         return res
+//           .status(403)
+//           .json({ error: "Only admin can auto-generate renewals" });
+//       }
+
+//       // Find customers that do NOT have any renewal yet
+//       const [customersWithoutRenewal] = await pool.execute(
+//         `
+//         SELECT c.*
+//         FROM customers c
+//         LEFT JOIN renewals r ON r.customer_id = c.id
+//         WHERE r.id IS NULL
+//       `,
+//       );
+
+//       if (customersWithoutRenewal.length === 0) {
+//         return res.json({
+//           message: "All customers already have renewals",
+//           created: 0,
+//         });
+//       }
+
+//       const createdRenewals = [];
+
+//       for (const customer of customersWithoutRenewal) {
+//         // Reuse your existing builder (already updated to use created_at)
+//         const built = buildRenewalFromCustomer(customer, {});
+
+//         const renewalId = uuidv4();
+
+//         await pool.execute(
+//           `
+//           INSERT INTO renewals (
+//             id,
+//             customer_id,
+//             service,
+//             amount,
+//             expiry_date,
+//             status,
+//             reminder_days,
+//             notes
+//           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+//         `,
+//           sanitizeParams(
+//             renewalId,
+//             customer.id,
+//             built.service,
+//             built.amount,
+//             built.expiryDate, // YYYY-MM-DD
+//             built.status,
+//             built.reminderDays,
+//             built.notes,
+//           ),
+//         );
+
+//         createdRenewals.push({
+//           renewalId,
+//           customerId: customer.id,
+//           expiryDate: built.expiryDate,
+//           status: built.status,
+//         });
+//       }
+
+//       return res.json({
+//         message: "Auto-generated renewals for customers without one",
+//         created: createdRenewals.length,
+//         renewals: createdRenewals,
+//       });
+//     } catch (error) {
+//       console.error("Auto-generate renewals error:", error);
+//       res
+//         .status(500)
+//         .json({ error: "Failed to auto-generate renewals" });
+//     }
+//   },
+// );
+
+//without auth
+
+
+// Auto-generate renewals for all customers without a renewal (TEST ONLY - no auth)
+router.post("/auto-generate", async (req, res) => {
+  try {
+    // Find customers that do NOT have any renewal yet
+    const [customersWithoutRenewal] = await pool.execute(
+      `
+      SELECT c.*
+      FROM customers c
+      LEFT JOIN renewals r ON r.customer_id = c.id
+      WHERE r.id IS NULL
+    `,
+    );
+
+    if (customersWithoutRenewal.length === 0) {
+      return res.json({
+        message: "All customers already have renewals",
+        created: 0,
+      });
+    }
+
+    const createdRenewals = [];
+
+    for (const customer of customersWithoutRenewal) {
+      const built = buildRenewalFromCustomer(customer, {}); // uses created_at
+
+      const renewalId = uuidv4();
+
+      await pool.execute(
+        `
+        INSERT INTO renewals (
+          id,
+          customer_id,
+          service,
+          amount,
+          expiry_date,
+          status,
+          reminder_days,
+          notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+        sanitizeParams(
+          renewalId,
+          customer.id,
+          built.service,
+          built.amount,
+          built.expiryDate,
+          built.status,
+          built.reminderDays,
+          built.notes,
+        ),
+      );
+
+      createdRenewals.push({
+        renewalId,
+        customerId: customer.id,
+        expiryDate: built.expiryDate,
+        status: built.status,
+      });
+    }
+
+    return res.json({
+      message: "Auto-generated renewals for customers without one",
+      created: createdRenewals.length,
+      renewals: createdRenewals,
+    });
+  } catch (error) {
+    console.error("Auto-generate renewals error:", error);
+    res.status(500).json({ error: "Failed to auto-generate renewals" });
   }
 });
 

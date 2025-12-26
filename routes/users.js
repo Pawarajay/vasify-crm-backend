@@ -256,5 +256,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch user" });
   }
 });
+// GET /api/users - basic list for filters
+
 
 module.exports = router;
