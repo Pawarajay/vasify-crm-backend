@@ -3,10 +3,10 @@ require("dotenv").config()
 
 
 const dbConfig = {
-  host: process.env.DB_HOST || "localhost",
+  host: process.env.DB_HOST || "13.203.39.243",
   user: process.env.DB_USER || "ajay",
   password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "vasify_crm",
+  database: process.env.DB_NAME || "vasifytech_dev",
   port: process.env.DB_PORT || 3306,
   waitForConnections: true,
   connectionLimit: 10,

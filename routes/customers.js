@@ -920,6 +920,8 @@ const parseTags = (value) => {
   }
 };
 
+
+
 // Helper: map request keys to DB columns (whitelist)
 const customerFieldMap = {
   name: "name",
@@ -962,6 +964,64 @@ const customerFieldMap = {
   defaultRenewalReminderDays: "default_renewal_reminder_days",
   defaultRenewalNotes: "default_renewal_notes",
 };
+
+
+
+//testing for invoice auto genrate
+
+// Add these helper functions at the top of your customer route file
+// (after the require statements and before the router definitions)
+
+// Helper: Convert date to SQL format (YYYY-MM-DD)
+// const toSqlDate = (value) => {
+//   if (!value) return null;
+//   const d = value instanceof Date ? value : new Date(value);
+//   if (Number.isNaN(d.getTime())) return null;
+//   const y = d.getFullYear();
+//   const m = String(d.getMonth() + 1).padStart(2, "0");
+//   const day = String(d.getDate()).padStart(2, "0");
+//   return `${y}-${m}-${day}`;
+// };
+
+// // Helper: Generate unique invoice number with format INV-YYYY-NNNN
+// // This function generates auto-incrementing invoice numbers
+// const generateInvoiceNumber = () => {
+//   const now = new Date();
+//   const year = now.getFullYear();
+//   const month = String(now.getMonth() + 1).padStart(2, '0');
+//   const timestamp = Date.now();
+//   const random = Math.floor(Math.random() * 1000);
+  
+//   // Format: INV-YYYYMM-TIMESTAMP-RAND (ensures uniqueness)
+//   return `INV-${year}${month}-${timestamp}-${random}`;
+// };
+
+// // Alternative: If you want sequential numbers, use this version instead
+// // Note: This requires querying the database, so it's slower but gives cleaner numbers
+// const generateSequentialInvoiceNumber = async (connection) => {
+//   try {
+//     const [result] = await connection.execute(
+//       `SELECT invoice_number FROM invoices 
+//        WHERE invoice_number LIKE 'INV-%' 
+//        ORDER BY created_at DESC LIMIT 1`
+//     );
+    
+//     if (result.length === 0) {
+//       return 'INV-000001';
+//     }
+    
+//     const lastNumber = result[0].invoice_number;
+//     const numberPart = parseInt(lastNumber.split('-')[1]) || 0;
+//     const nextNumber = numberPart + 1;
+    
+//     return `INV-${String(nextNumber).padStart(6, '0')}`;
+//   } catch (error) {
+//     console.error('Error generating sequential invoice number:', error);
+//     // Fallback to timestamp-based if query fails
+//     return `INV-${Date.now()}`;
+//   }
+// };
+
 
 // GET all customers with filtering and pagination
 router.get(
@@ -1406,6 +1466,377 @@ router.post(
     }
   }
 );
+
+//testing for invoice automatic genration
+// ✅ UPDATED CREATE new customer (with auto-invoice generation)
+// router.post(
+//   "/",
+//   authenticateToken,
+//   [
+//     body("name").trim().notEmpty().withMessage("Name is required"),
+//     body("email").isEmail().withMessage("Valid email is required"),
+//     body("phone").optional().isString().withMessage("Phone must be a string"),
+//     body("company").optional().isString().withMessage("Company must be a string"),
+//     body("address").optional().isString().withMessage("Address must be a string"),
+//     body("city").optional().isString().withMessage("City must be a string"),
+//     body("state").optional().isString().withMessage("State must be a string"),
+//     body("zipCode").optional().isString().withMessage("Zip code must be a string"),
+//     body("country").optional().isString().withMessage("Country must be a string"),
+//     body("status")
+//       .optional()
+//       .isIn(["active", "inactive", "prospect"])
+//       .withMessage("Invalid status"),
+//     body("source").optional().isString().withMessage("Source must be a string"),
+//     body("tags").optional().isArray().withMessage("Tags must be an array"),
+//     body("notes").optional().isString().withMessage("Notes must be a string"),
+//     body("totalValue").optional().isNumeric().withMessage("Total value must be numeric"),
+//     body("whatsappNumber")
+//       .optional()
+//       .isString()
+//       .withMessage("WhatsApp number must be a string"),
+
+//     // service / pricing
+//     body("service").optional().isString().withMessage("Service must be a string"),
+//     body("serviceType")
+//       .optional()
+//       .isIn(["whatsapp_api", "website_dev", "ai_agent"])
+//       .withMessage("Invalid service type"),
+//     body("oneTimePrice").optional().isNumeric().withMessage("One-time price must be numeric"),
+//     body("monthlyPrice").optional().isNumeric().withMessage("Monthly price must be numeric"),
+//     body("manualPrice").optional().isNumeric().withMessage("Manual price must be numeric"),
+
+//     // invoice defaults
+//     body("defaultTaxRate").optional().isNumeric().withMessage("Default tax rate must be numeric"),
+//     body("defaultDueDays").optional().isInt().withMessage("Default due days must be an integer"),
+//     body("defaultInvoiceNotes").optional().isString().withMessage("Default invoice notes must be a string"),
+
+//     // recurring
+//     body("recurringEnabled")
+//       .optional()
+//       .isBoolean()
+//       .withMessage("Recurring enabled must be boolean"),
+//     body("recurringInterval")
+//       .optional()
+//       .isIn(["monthly", "yearly"])
+//       .withMessage("Recurring interval must be monthly or yearly"),
+//     body("recurringAmount").optional().isNumeric().withMessage("Recurring amount must be numeric"),
+//     body("recurringService").optional().isString().withMessage("Recurring service must be a string"),
+
+//     // renewals
+//     body("nextRenewalDate").optional().isISO8601().withMessage("Next renewal date must be a valid date"),
+//     body("defaultRenewalStatus")
+//       .optional()
+//       .isIn(["active", "expiring", "expired", "renewed"])
+//       .withMessage("Invalid default renewal status"),
+//     body("defaultRenewalReminderDays")
+//       .optional()
+//       .isInt()
+//       .withMessage("Default renewal reminder days must be an integer"),
+//     body("defaultRenewalNotes").optional().isString().withMessage("Default renewal notes must be a string"),
+//     body("leadId").optional().isString().withMessage("leadId must be a string"),
+//   ],
+//   async (req, res) => {
+//     const connection = await pool.getConnection();
+    
+//     try {
+//       if (handleValidation(req, res)) return;
+
+//       let {
+//         name,
+//         email,
+//         phone,
+//         company,
+//         address,
+//         city,
+//         state,
+//         zipCode,
+//         country,
+//         status = "prospect",
+//         source,
+//         tags = [],
+//         notes,
+//         totalValue,
+//         whatsappNumber,
+//         service,
+//         serviceType,
+//         oneTimePrice,
+//         monthlyPrice,
+//         manualPrice,
+//         leadId,
+
+//         defaultTaxRate,
+//         defaultDueDays,
+//         defaultInvoiceNotes,
+
+//         recurringEnabled,
+//         recurringInterval,
+//         recurringAmount,
+//         recurringService,
+
+//         nextRenewalDate,
+//         defaultRenewalStatus,
+//         defaultRenewalReminderDays,
+//         defaultRenewalNotes,
+//       } = req.body;
+
+//       const assignedTo = req.user.userId;
+//       const customerId = uuidv4();
+
+//       // Auto-populate service from lead if leadId provided
+//       if (leadId && (!service || !serviceType)) {
+//         const [lead] = await pool.execute(
+//           "SELECT service FROM leads WHERE id = ?",
+//           sanitizeParams(leadId)
+//         );
+        
+//         if (lead.length > 0 && lead[0].service) {
+//           service = lead[0].service;
+//           serviceType = service === 'WhatsApp Business API' ? 'whatsapp_api' :
+//                        service === 'Website Development' ? 'website_dev' :
+//                        service === 'AI Agent' ? 'ai_agent' : serviceType;
+          
+//           notes = notes ? `${notes}\n\n[From Lead #${leadId}] Service: ${service}` : `[From Lead #${leadId}] Service: ${service}`;
+//           console.log(`Auto-filled service "${service}" from lead ${leadId}`);
+//         }
+//       }
+
+//       const totalValueNumber =
+//         totalValue !== undefined && totalValue !== null && totalValue !== ""
+//           ? Number(totalValue)
+//           : 0;
+
+//       // Check for duplicate email
+//       const [existingCustomers] = await pool.execute(
+//         "SELECT id FROM customers WHERE email = ?",
+//         sanitizeParams(email)
+//       );
+
+//       if (existingCustomers.length > 0) {
+//         connection.release();
+//         return res
+//           .status(400)
+//           .json({ error: "Customer with this email already exists" });
+//       }
+
+//       // ✅ START TRANSACTION for customer + invoice creation
+//       await connection.beginTransaction();
+
+//       // Create Customer
+//       await connection.execute(
+//         `
+//         INSERT INTO customers (
+//           id,
+//           name,
+//           email,
+//           phone,
+//           company,
+//           address,
+//           city,
+//           state,
+//           zip_code,
+//           country,
+//           status,
+//           source,
+//           assigned_to,
+//           tags,
+//           notes,
+//           last_contact_date,
+//           total_value,
+//           one_time_price,
+//           monthly_price,
+//           manual_price,
+//           default_tax_rate,
+//           default_due_days,
+//           default_invoice_notes,
+//           whatsapp_number,
+//           service,
+//           service_type,
+//           recurring_enabled,
+//           recurring_interval,
+//           recurring_amount,
+//           recurring_service,
+//           next_renewal_date,
+//           default_renewal_status,
+//           default_renewal_reminder_days,
+//           default_renewal_notes
+//         )
+//         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+//         `,
+//         sanitizeParams(
+//           customerId,
+//           name,
+//           email,
+//           phone,
+//           company,
+//           address,
+//           city,
+//           state,
+//           zipCode,
+//           country || "India",
+//           status || "prospect",
+//           source,
+//           assignedTo,
+//           JSON.stringify(tags || []),
+//           notes,
+//           null,
+//           totalValueNumber,
+//           oneTimePrice != null && oneTimePrice !== "" ? Number(oneTimePrice) : null,
+//           monthlyPrice != null && monthlyPrice !== "" ? Number(monthlyPrice) : null,
+//           manualPrice != null && manualPrice !== "" ? Number(manualPrice) : null,
+//           defaultTaxRate,
+//           defaultDueDays,
+//           defaultInvoiceNotes,
+//           whatsappNumber,
+//           service,
+//           serviceType || null,
+//           recurringEnabled ? 1 : 0,
+//           recurringInterval || "monthly",
+//           recurringAmount,
+//           recurringService,
+//           nextRenewalDate,
+//           defaultRenewalStatus,
+//           defaultRenewalReminderDays,
+//           defaultRenewalNotes
+//         )
+//       );
+
+//       // ✅ AUTO-CREATE INVOICE with unique invoice number
+//       const invoiceId = uuidv4();
+//       const invoiceNumber = generateInvoiceNumber();
+
+//       // Calculate invoice amounts based on pricing
+//       let invoiceAmount = 0;
+//       let invoiceDescription = "Initial Service Charges";
+
+//       if (manualPrice != null && manualPrice !== "") {
+//         invoiceAmount = Number(manualPrice);
+//         invoiceDescription = service ? `${service} - Manual Pricing` : "Manual Pricing";
+//       } else if (oneTimePrice != null && oneTimePrice !== "") {
+//         invoiceAmount = Number(oneTimePrice);
+//         invoiceDescription = service ? `${service} - One-time Setup` : "One-time Setup";
+//       } else if (monthlyPrice != null && monthlyPrice !== "") {
+//         invoiceAmount = Number(monthlyPrice);
+//         invoiceDescription = service ? `${service} - Monthly Subscription` : "Monthly Subscription";
+//       } else if (totalValueNumber > 0) {
+//         invoiceAmount = totalValueNumber;
+//         invoiceDescription = service || "Service Charges";
+//       }
+
+//       const taxRate = defaultTaxRate || 18;
+//       const taxAmount = (invoiceAmount * taxRate) / 100;
+//       const totalAmount = invoiceAmount + taxAmount;
+
+//       // Calculate due date
+//       const dueDays = defaultDueDays || 7;
+//       const dueDate = new Date();
+//       dueDate.setDate(dueDate.getDate() + dueDays);
+//       const dueDateStr = toSqlDate(dueDate);
+
+//       const issueDateStr = toSqlDate(new Date());
+
+//       // Insert Invoice
+//       await connection.execute(
+//         `INSERT INTO invoices (
+//           id, 
+//           customer_id, 
+//           invoice_number, 
+//           amount, 
+//           tax, 
+//           total, 
+//           status, 
+//           issue_date, 
+//           due_date, 
+//           notes
+//         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//         sanitizeParams(
+//           invoiceId,
+//           customerId,
+//           invoiceNumber,
+//           invoiceAmount,
+//           taxRate,
+//           totalAmount,
+//           'draft',
+//           issueDateStr,
+//           dueDateStr,
+//           defaultInvoiceNotes || `Auto-generated invoice for ${name}`
+//         )
+//       );
+
+//       // Insert Invoice Item
+//       await connection.execute(
+//         `INSERT INTO invoice_items (
+//           id, 
+//           invoice_id, 
+//           description, 
+//           quantity, 
+//           rate, 
+//           amount
+//         ) VALUES (?, ?, ?, ?, ?, ?)`,
+//         sanitizeParams(
+//           uuidv4(),
+//           invoiceId,
+//           invoiceDescription,
+//           1,
+//           invoiceAmount,
+//           invoiceAmount
+//         )
+//       );
+
+//       // ✅ COMMIT TRANSACTION
+//       await connection.commit();
+
+//       // Fetch created customer with user details
+//       const [customers] = await connection.execute(
+//         `
+//         SELECT 
+//           c.*,
+//           u.name AS assigned_user_name
+//         FROM customers c
+//         LEFT JOIN users u ON c.assigned_to = u.id
+//         WHERE c.id = ?
+//         `,
+//         sanitizeParams(customerId)
+//       );
+
+//       const customer = customers[0];
+//       customer.tags = parseTags(customer.tags);
+
+//       // Fetch created invoice
+//       const [invoices] = await connection.execute(
+//         `SELECT i.*, c.name AS customer_name, c.email AS customer_email 
+//          FROM invoices i 
+//          LEFT JOIN customers c ON i.customer_id = c.id 
+//          WHERE i.id = ?`,
+//         sanitizeParams(invoiceId)
+//       );
+
+//       const [invoiceItems] = await connection.execute(
+//         "SELECT * FROM invoice_items WHERE invoice_id = ?",
+//         sanitizeParams(invoiceId)
+//       );
+
+//       const invoice = invoices[0];
+//       invoice.items = invoiceItems;
+
+//       res.status(201).json({
+//         message: `Customer created successfully${leadId ? ` from lead #${leadId}` : ""} with invoice ${invoiceNumber}`,
+//         customer,
+//         invoice,
+//       });
+
+//     } catch (error) {
+//       // ✅ ROLLBACK on error
+//       await connection.rollback();
+//       console.error("Customer creation error:", error);
+//       res.status(500).json({ 
+//         error: "Failed to create customer and invoice",
+//         details: error.message 
+//       });
+//     } finally {
+//       connection.release();
+//     }
+//   }
+// );
 
 // UPDATE customer
 router.put(
