@@ -193,8 +193,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // ✅ FIX: Remove trailing slash and support multiple origins
-const FRONTEND_URL = (process.env.FRONTEND_URL || "https://vasify-crm-frontend.vercel.app").replace(/\/$/, '');
-// const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, '');
+// const FRONTEND_URL = (process.env.FRONTEND_URL || "https://vasify-crm-frontend.vercel.app").replace(/\/$/, '');
+const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, '');
 
 // Configure allowed origins
 const allowedOrigins = [
