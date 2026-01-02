@@ -1,4 +1,3 @@
-// debug-reset-admin.js
 const bcrypt = require("bcryptjs");
 const { pool } = require("./config/database");
 

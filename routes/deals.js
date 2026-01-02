@@ -6,7 +6,6 @@ const { authenticateToken } = require("../middleware/auth")
 
 const router = express.Router()
 
-// Helpers
 const handleValidation = (req, res) => {
   const errors = validationResult(req)
   if (!errors.isEmpty()) {
