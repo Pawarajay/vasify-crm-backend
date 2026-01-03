@@ -1,22 +1,25 @@
 FROM node:22-alpine
 
-RUN npm install -g pnpm@latest
-
 WORKDIR /app
+
+RUN addgroup -g 1001 nodejs && adduser -S nextjs -u 1001
 
 COPY package.json /app
 
 COPY package-lock.json /app
 
-RUN pnpm install
+RUN npm install
 
-COPY . /app
+COPY . /app/
 
-RUN pnpm build
+ENV NEXT_TELEMETRY_DISABLED=1
 
-EXPOSE 8005
+ENV NODE_ENV=production
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-  CMD wget -q --spider http://localhost:8005/ || exit 1
+RUN chown -R nextjs:nodejs /app
 
-CMD ["npm", "run", "dev"]
+USER nextjs
+
+EXPOSE 5000
+
+CMD ["npm", "start"]
